@@ -1,0 +1,5 @@
+{
+    "files.associations": {
+        "usart_rs232_h_file.h": "c"
+    }
+}
