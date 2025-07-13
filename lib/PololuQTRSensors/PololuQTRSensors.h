@@ -244,9 +244,7 @@ class PololuQTRSensorsRC : public PololuQTRSensors
 	// pointer to PIN registers
 	volatile unsigned char* _register[QTR_MAX_SENSORS];	// needs to be volatile
 
-	#ifdef _ORANGUTAN_XX4
 	unsigned char _portAMask;
-    #endif
 	unsigned char _portBMask;
 	unsigned char _portCMask;
 	unsigned char _portDMask;

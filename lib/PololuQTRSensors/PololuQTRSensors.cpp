@@ -602,10 +602,10 @@ void PololuQTRSensorsRC::readPrivate(unsigned int *sensor_values)
 	PORTC &= ~_portCMask;
 	PORTD &= ~_portDMask;
 
-	unsigned char prevTCCR2A = TCCR2A;
-	unsigned char prevTCCR2B = TCCR2B;
-	TCCR2A |= 0x03;
-	TCCR2B = 0x02;		// run timer2 in normal mode at 2.5 MHz
+	unsigned char prevTCCR2A = TCCR1A;
+	unsigned char prevTCCR2B = TCCR1B;
+	TCCR1A |= 0x03;
+	TCCR1B = 0x02;		// run timer2 in normal mode at 2.5 MHz
 						// this is compatible with OrangutanMotors
 
 	last_time = TCNT2;
@@ -641,8 +641,8 @@ void PololuQTRSensorsRC::readPrivate(unsigned int *sensor_values)
 		}
 	}
 
-	TCCR2A = prevTCCR2A;
-	TCCR2B = prevTCCR2B;
+	TCCR1A = prevTCCR2A;
+	TCCR1B = prevTCCR2B;
 	for(i = 0; i < _numSensors; i++)
 		if (!sensor_values[i])
 			sensor_values[i] = _maxValue;
@@ -702,13 +702,9 @@ void PololuQTRSensorsAnalog::init(unsigned char* analogPins,
 	for (i = 0; i < _numSensors; i++)
 	{
 		_analogPins[i] = analogPins[i];
-    	_portMask |= (1 << analogPins[i]);
+    	_portMask |= (1 << (analogPins[i] - 33));
 	}
 
-	#ifndef _ORANGUTAN_XX4
-	// no need to mask for dedicated analog inputs ADC6 and ADC7
-	_portMask &= 0x3F;
-	#endif
 
 	_maxValue = 1023; // this is the maximum returned by the A/D conversion
 }
@@ -740,15 +736,15 @@ void PololuQTRSensorsAnalog::readPrivate(unsigned int *sensor_values)
 		sensor_values[i] = 0;
 
 	// set all sensor pins to high-Z inputs
-	ANALOG_DDR &= ~_portMask;
-	ANALOG_PORT &= ~_portMask;
-
+	// DDRA &= ~_portMask;
+	// PORTA &= ~_portMask;
+	DDRA = 0x00;
 	ADCSRA = 0x87;	// configure the ADC
+	ADMUX = (1<<REFS0) | (1<<ADLAR);// set analog input channel
 	for (j = 0; j < _numSamplesPerSensor; j++)
 	{
 		for (i = 0; i < _numSensors; i++)
 		{
-			ADMUX = (1<<6) | _analogPins[i];// set analog input channel
 			ADCSRA |= 1 << ADSC;			// start the conversion
 			while (ADCSRA & (1 << ADSC));	// wait for conversion to finish
 			sensor_values[i] += ADC;		// add in the conversion result
@@ -757,7 +753,7 @@ void PololuQTRSensorsAnalog::readPrivate(unsigned int *sensor_values)
 	
 	// get the rounded average of the readings for each sensor
 	for (i = 0; i < _numSensors; i++)
-		sensor_values[i] = (sensor_values[i] + (_numSamplesPerSensor >> 1)) /
+		sensor_values[i] = (sensor_values[i]) /
 			_numSamplesPerSensor;
 
 	ADMUX = admux;

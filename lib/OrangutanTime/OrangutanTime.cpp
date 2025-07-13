@@ -32,6 +32,7 @@
 
 #include "OrangutanTime.h"
 #include <avr/interrupt.h>
+#include <avr/io.h>
 
 volatile unsigned long tickCount = 0;	// incremented by 256 every T2 OVF (units of 0.4 us)
 volatile unsigned long msCounter = 0;	// returned by millis(), updated by T2 OVF ISR
@@ -114,9 +115,9 @@ extern "C" {
 unsigned long OrangutanTime::ticks()
 {
 	init();
-	TIMSK2 &= ~(1 << TOIE2);	// disable timer2 overflow interrupt
+	TIMSK &= ~(1 << TOIE2);	// disable timer2 overflow interrupt
 	unsigned long numTicks = TCNT2 | tickCount;	// TCNT2 is lowest byte of tickCount
-	if (TIFR2 & (1 << TOV2))	// if TCNT2 has overflowed since we disabled t2 ovf interrupt
+	if (TIFR & (1 << TOV2))	// if TCNT2 has overflowed since we disabled t2 ovf interrupt
 	{
 		// NOTE: it is important to perform this computation again.  If we use a value of TCNT2 read
 		// before we checked for the overflow, it might be something like 255 while it becomes 0 after
@@ -124,7 +125,7 @@ unsigned long OrangutanTime::ticks()
 		// For example, the following line should *NOT* be: numTicks += 256;
 		numTicks = TCNT2 | (tickCount + 256);		// compute ticks again and add 256 for the overflow
 	}
-	TIMSK2 |= 1 << TOIE2;	// enable timer2 overflow interrupt
+	TIMSK |= 1 << TOIE2;	// enable timer2 overflow interrupt
 	return numTicks;
 }
 
@@ -148,9 +149,9 @@ unsigned long OrangutanTime::ms()
 {
 	init();
 	unsigned long value;
-	TIMSK2 &= ~(1 << TOIE2);	// disable timer2 overflow interrupt
+	TIMSK &= ~(1 << TOIE2);	// disable timer2 overflow interrupt
 	value = msCounter;
-	TIMSK2 |= 1 << TOIE2;	// enable timer2 overflow interrupt
+	TIMSK |= 1 << TOIE2;	// enable timer2 overflow interrupt
 	return value;
 }
 
@@ -162,7 +163,7 @@ void OrangutanTime::delayMilliseconds(unsigned int milliseconds)
 
 void OrangutanTime::init2()
 {
-	TIMSK2 &= ~(1 << TOIE2);	// disable timer2 overflow interrupt
+	TIMSK &= ~(1 << TOIE2);	// disable timer2 overflow interrupt
 
 /*  40 kHz operation
 		us_over_10_increment = 255;	// increment us_over_10 by this every timer 2 overflow
@@ -172,12 +173,12 @@ void OrangutanTime::init2()
 		TCCR2B |= 0x01;		// timer2 ticks at 20 MHz (prescaler = 1)
 */
 
-	TCCR2A |= 0x03;		// fast PWM, TOP = 0xFF
-	TCCR2B &= 0xF0;
-	TCCR2B |= 0x02;		// timer 2 ticks at 2.5 MHz (prescaler = 8)
+	TCCR1A |= 0x03;		// fast PWM, TOP = 0xFF
+	TCCR1B &= 0xF0;
+	TCCR1B |= 0x02;		// timer 2 ticks at 2.5 MHz (prescaler = 8)
 
-	TIFR2 |= 1 << TOV2;	// clear timer2 overflow flag
-	TIMSK2 |= 1 << TOIE2;	// enable timer2 overflow interrupt
+	TIFR |= 1 << TOV2;	// clear timer2 overflow flag
+	TIMSK |= 1 << TOIE2;	// enable timer2 overflow interrupt
 	sei();				// enable global interrupts
 }
 
@@ -185,10 +186,10 @@ void OrangutanTime::init2()
 void OrangutanTime::reset()
 {
 	init();
-	TIMSK2 &= ~(1 << TOIE2);	// disable timer2 overflow interrupt
+	TIMSK &= ~(1 << TOIE2);	// disable timer2 overflow interrupt
 	msCounter = 0;
 	us_over_10 = 0;
-	TIMSK2 |= 1 << TOIE2;	// enable timer2 overflow interrupt
+	TIMSK |= 1 << TOIE2;	// enable timer2 overflow interrupt
 }
 
 

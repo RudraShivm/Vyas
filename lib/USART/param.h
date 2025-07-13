@@ -3,7 +3,6 @@
 #include <math.h>
 #include <avr/interrupt.h>
 
-#define F_CPU 16000000UL					/* Define CPU clock Frequency */
 #define BAUDRATE 115200
 #define DOUBLE_SPEED_MODE
 #define STRING_BUFFER_SIZE 50

@@ -13,7 +13,7 @@
 #define MOTOR_STBY 24       // PC2 for TB6612FNG standby control
 #define RIGHT_MOTOR_DIR1 25 // PC3 for right motor direction (AIN1)
 #define RIGHT_MOTOR_DIR2 26 // PC4 for right motor direction (AIN2)
-#define LEFT_MOTOR_MAX 250  // calibrated value
+#define LEFT_MOTOR_MAX 245  // calibrated value
 #define RIGHT_MOTOR_MAX 255
 #define LED PORTB /* connected LED on PORT pin */
 #define EMITTER_PIN_PORT PORTC
@@ -22,19 +22,16 @@
 #define CALIBRATION_TIME_MS 5000 // 5 seconds for calibration
 #define NUM_SENSORS 8
 // PID constants
-#define KP 0.1                    // Proportional gain for PID control
-#define KD 0.5                    // Derivative gain for PID control
-#define BASE_SPEED 70             // Base PWM value for motor speed (0-255)
+#define KP 0.5                    // Proportional gain for PID control
+#define KD 2.0                    // Derivative gain for PID control
+#define BASE_SPEED 150            // Base PWM value for motor speed (0-255)
 #define LINE_POSITION_CENTER 3500 // Center position for 8 sensors (0–7000)
-#define BLACK_THRESHOLD 700       // Threshold for detecting black line
-#define NO_SURFACE_THRESHOLD 1000 // Threshold for detecting no surface
-#define HALF_TURN_DELAY 1000       // Turning 90 Degree delay
-#define DELAY_BEFORE_TURN 100
-#define DELAY_AFTER_TURN 300
-#define MAX_CORRECTION 100
+#define BLACK_THRESHOLD 600       // Threshold for detecting black line
+#define NO_SURFACE_THRESHOLD 950  // Threshold for detecting no surface
+#define HALF_TURN_DELAY 200       // Turning 90 Degree delay
+
 // Calibration data structure
-typedef struct
-{
+typedef struct {
     uint16_t minValues[NUM_SENSORS];
     uint16_t maxValues[NUM_SENSORS];
 } CalibrationData;
@@ -117,40 +114,6 @@ void setMotorSpeeds(int16_t leftSpeed, int16_t rightSpeed)
         g_rightSpeed = rightSpeed;
     }
 }
-void turnLeft()
-{
-    setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
-    _delay_ms(DELAY_BEFORE_TURN);
-    setMotorSpeeds(0, BASE_SPEED);
-    _delay_ms(HALF_TURN_DELAY);
-    setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
-    _delay_ms(DELAY_AFTER_TURN);
-    setMotorSpeeds(0, 0);
-}
-void turnRight()
-{
-    setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
-    _delay_ms(DELAY_BEFORE_TURN);
-    setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, 0);
-    _delay_ms(HALF_TURN_DELAY);
-    setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
-    _delay_ms(DELAY_AFTER_TURN);
-    setMotorSpeeds(0, 0);
-}
-void goForward()
-{
-    setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
-    _delay_ms(1000);
-    setMotorSpeeds(0, 0);
-}
-void goBack()
-{
-    setMotorSpeeds(0, BASE_SPEED);
-    _delay_ms(HALF_TURN_DELAY * 2);
-    setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
-    _delay_ms(DELAY_AFTER_TURN);
-    setMotorSpeeds(0, 0);
-}
 
 void ADC_Init(void)
 {
@@ -167,8 +130,7 @@ uint16_t ADC_Read(uint8_t channel)
     // Start conversion
     ADCSRA |= (1 << ADSC);
     // Wait for conversion to complete
-    while (ADCSRA & (1 << ADSC))
-        ;
+    while (ADCSRA & (1 << ADSC));
     // Return 10-bit ADC value
     return ADC;
 }
@@ -176,20 +138,19 @@ uint16_t ADC_Read(uint8_t channel)
 void QTR_EmitterOn(void)
 {
     EMITTER_PIN_PORT |= (1 << EMITTER_PIN); // Set PD0 high
-    _delay_us(200);                         // Wait for sensors to stabilize
+    _delay_us(200); // Wait for sensors to stabilize
 }
 
 void QTR_EmitterOff(void)
 {
     EMITTER_PIN_PORT &= ~(1 << EMITTER_PIN); // Set PD0 low
-    _delay_us(200);                          // Wait for sensors to stabilize
+    _delay_us(200); // Wait for sensors to stabilize
 }
 // Perform automated calibration by moving robot in zigzag pattern
-void calibrateSensors(CalibrationData *calData)
+void calibrateSensors(CalibrationData* calData)
 {
     // Initialize min and max values
-    for (uint8_t i = 0; i < NUM_SENSORS; i++)
-    {
+    for (uint8_t i = 0; i < NUM_SENSORS; i++) {
         calData->minValues[i] = 1023; // Max ADC value
         calData->maxValues[i] = 0;    // Min ADC value
     }
@@ -198,17 +159,13 @@ void calibrateSensors(CalibrationData *calData)
     USART_SendString("Calibrating sensors... Move over line and surface\r\n");
 
     // Calibration loop for 5 seconds
-    uint32_t startTime = 0;
-    while (startTime < CALIBRATION_TIME_MS)
-    {
+    uint32_t startTime = 0; // Simplified timer (assumes 16 MHz clock)
+    while (startTime < CALIBRATION_TIME_MS) {
         QTR_EmitterOn();
-        for (uint8_t i = 0; i < NUM_SENSORS; i++)
-        {
+        for (uint8_t i = 0; i < NUM_SENSORS; i++) {
             uint16_t value = ADC_Read(i);
-            if (value < calData->minValues[i])
-                calData->minValues[i] = value;
-            if (value > calData->maxValues[i])
-                calData->maxValues[i] = value;
+            if (value < calData->minValues[i]) calData->minValues[i] = value;
+            if (value > calData->maxValues[i]) calData->maxValues[i] = value;
         }
         QTR_EmitterOff();
         _delay_ms(20); // Sample every 20ms
@@ -218,46 +175,43 @@ void calibrateSensors(CalibrationData *calData)
     // Send calibration complete message with min/max values
     char buf[32];
     USART_SendString("Calibration complete. Min/Max values:\r\n");
-    for (uint8_t i = 0; i < NUM_SENSORS; i++)
-    {
+    for (uint8_t i = 0; i < NUM_SENSORS; i++) {
         snprintf(buf, sizeof(buf), "S%d: %d/%d ", i, calData->minValues[i], calData->maxValues[i]);
         USART_SendString(buf);
     }
     USART_SendString("\r\n");
 }
 
-void readCalibrated(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationData *calData)
+void readCalibrated(uint16_t* sensorValues, uint16_t* calibratedValues, CalibrationData* calData)
 {
     QTR_EmitterOn();
-    for (uint8_t i = 0; i < NUM_SENSORS; i++)
-    {
+    for (uint8_t i = 0; i < NUM_SENSORS; i++) {
         sensorValues[i] = ADC_Read(i);
         // Normalize to 0–1000
-        if (calData->maxValues[i] > calData->minValues[i])
-        {
-            if (sensorValues[i] < calData->minValues[i])
-            {
-                calData->minValues[i] = sensorValues[i]; // in case sensor value becomes less than minimum calibrated value
-            }
+        if (calData->maxValues[i] > calData->minValues[i]) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "sensorVal: %d\r\n",sensorValues[i]);
+            USART_SendString(buf);
+            snprintf(buf, sizeof(buf), "calMax: %d, calMin: %d, sen: %d\r\n", calData->maxValues[i], calData->minValues[i], sensorValues[i]);
+            USART_SendString(buf);
             calibratedValues[i] = ((uint32_t)(sensorValues[i] - calData->minValues[i]) * 1000) /
-                                  (calData->maxValues[i] - calData->minValues[i]);
-        }
-        else
-        {
+                                 (calData->maxValues[i] - calData->minValues[i]);
+            snprintf(buf, sizeof(buf), "caliVAl: %d\r\n", calibratedValues[i]);
+            USART_SendString(buf);
+        } else {
             calibratedValues[i] = 0; // Avoid division by zero
         }
     }
     QTR_EmitterOff();
 }
 
-uint16_t readLinePosition(uint16_t *calibratedValues, uint8_t numSensors)
+uint16_t readLinePosition(uint16_t* calibratedValues, uint8_t numSensors)
 {
     uint32_t avg = 0;
     uint16_t sum = 0;
     uint8_t onLine = 0;
 
-    for (uint8_t i = 0; i < numSensors; i++)
-    {
+    for (uint8_t i = 0; i < numSensors; i++) {
         uint16_t value = calibratedValues[i];
         // Consider sensor "on line" if reading is above threshold (normalized scale)
         if (value > 500) // Threshold for normalized values (tune if needed)
@@ -269,8 +223,7 @@ uint16_t readLinePosition(uint16_t *calibratedValues, uint8_t numSensors)
     }
 
     // If no line detected, return center position (3500)
-    if (!onLine)
-    {
+    if (!onLine) {
         return 3500;
     }
 
@@ -278,60 +231,71 @@ uint16_t readLinePosition(uint16_t *calibratedValues, uint8_t numSensors)
     return (uint16_t)(avg / sum);
 }
 
-void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationData *calData)
+void followLine(PololuQTRSensorsAnalog &qtr)
 {
     static int16_t lastError = 0;
-    readCalibrated(sensorValues, calibratedValues, calData);
+    unsigned int sensorValues[8];
+    qtr.readCalibrated(sensorValues, QTR_EMITTERS_ON_AND_OFF);
 
     // Count sensors detecting black
     uint8_t blackSensors = 0;
+    uint8_t noSurfaceSensors = 0;
+    bool sensorState[8];
     uint8_t minBlackSensorIdx = 8;
     uint8_t maxBlackSensorIdx = -1;
     for (uint8_t i = 0; i < 8; i++)
     {
-        if (calibratedValues[i] > BLACK_THRESHOLD)
+        if (sensorValues[i] > BLACK_THRESHOLD)
         {
             blackSensors++;
+            sensorState[i] = true;
             if (i < minBlackSensorIdx)
                 minBlackSensorIdx = i;
             if (i < maxBlackSensorIdx)
                 maxBlackSensorIdx = i;
         }
+        if (sensorValues[i] > NO_SURFACE_THRESHOLD)
+        {
+            noSurfaceSensors++;
+        }
     }
     // Logic based on number of sensors detecting black
-    if (blackSensors >= 7)
+    if (noSurfaceSensors > 0) // Priority: Detect no surface first
     {
         setMotorSpeeds(0, 0); // Stop robot
-        robotMode = CMD;
+        USART_SendString("No surface detected, stopped\r\n");
+    }
+    else if (blackSensors > 5)
+    {
+        setMotorSpeeds(0, 0); // Stop robot
         USART_SendString("Victory\r\n");
     }
-    else if (blackSensors >= 6)
+    else if (blackSensors >= 4)
     {
-        if (maxBlackSensorIdx + minBlackSensorIdx <= 8 && maxBlackSensorIdx + minBlackSensorIdx >= 6)
+        if (maxBlackSensorIdx + minBlackSensorIdx <= 10 && maxBlackSensorIdx + minBlackSensorIdx >= 4)
         {
             // if the line is junction given that avg of max and min black sensor idx is towards mid
             setMotorSpeeds(0, 0); // Stop robot
-            robotMode = CMD;
         }
-        else if (maxBlackSensorIdx + minBlackSensorIdx > 8)
+        else
         {
-            turnRight();
-        }
-        else if (maxBlackSensorIdx + minBlackSensorIdx < 6)
-        {
-            turnLeft();
+            // else we probably encountered a turn in normal line and we have to keep following
+            unsigned int position = qtr.readLine(sensorValues, QTR_EMITTERS_ON_AND_OFF, 0);
+            int16_t error = position - LINE_POSITION_CENTER;
+            int16_t correction = KP * error + KD * (error - lastError);
+            lastError = error;
+            int16_t calibration_factor = LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX;
+            int16_t leftSpeed = BASE_SPEED + calibration_factor + correction;
+            int16_t rightSpeed = BASE_SPEED - correction;
+            setMotorSpeeds(leftSpeed, rightSpeed);
         }
     }
-    else if (blackSensors >= 2 && blackSensors <= 4)
+    else if (blackSensors >= 2 || blackSensors < 4)
     {
         // when at least 2 sensor senses black, keeping the detection at reasonable width for avoiding noise
-        unsigned int position = readLinePosition(calibratedValues, NUM_SENSORS);
+        unsigned int position = qtr.readLine(sensorValues, QTR_EMITTERS_ON_AND_OFF, 0);
         int16_t error = position - LINE_POSITION_CENTER;
         int16_t correction = KP * error + KD * (error - lastError);
-        if (correction > MAX_CORRECTION)
-            correction = MAX_CORRECTION;
-        else if (correction < -MAX_CORRECTION)
-            correction = -MAX_CORRECTION;
         lastError = error;
         int16_t calibration_factor = LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX;
         int16_t leftSpeed = BASE_SPEED + calibration_factor + correction;
@@ -345,13 +309,12 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
     }
 }
 
-const char *getDirection(uint16_t *calibratedValues, uint8_t numSensors)
+const char* getDirection(uint16_t* calibratedValues, uint8_t numSensors)
 {
     uint16_t leftSum = 0, centerSum = 0, rightSum = 0;
-
+    
     // Sum calibrated values for each region
-    for (uint8_t i = 0; i < numSensors; i++)
-    {
+    for (uint8_t i = 0; i < numSensors; i++) {
         if (i <= 2) // Sensors 0–2 (Left)
             leftSum += calibratedValues[i];
         else if (i <= 4) // Sensors 3–4 (Center)
@@ -377,8 +340,8 @@ int main(void)
     sei();        /* enable global interrupts for USART RX */
     initPWM();
     ADC_Init();
-    MCUCSR |= (1 << JTD);                  // Disable JTAG
-    MCUCSR |= (1 << JTD);                  // Write twice in the same cycle
+    MCUCSR |= (1 << JTD); // Disable JTAG
+    MCUCSR |= (1 << JTD); // Write twice in the same cycle
     EMITTER_PIN_DDR |= (1 << EMITTER_PIN); // Set emitter pin output
     CalibrationData calData;
     uint16_t sensorValues[NUM_SENSORS];
@@ -392,104 +355,135 @@ int main(void)
         if (USART_IsStringReady())
         {
             char *received = USART_GetStringBuffer();
-            char cmd = received[0];
-            if (robotMode == CMD)
+            if (strlen(received) == 1)
             {
+                char cmd = received[0];
+                if (robotMode == CMD)
+                {
+                    switch (cmd)
+                    {
+                    case 'R':
+                        setMotorSpeeds(LEFT_MOTOR_MAX / 2, 0);
+                        break;
+                    case 'L':
+                        setMotorSpeeds(0, RIGHT_MOTOR_MAX / 2);
+                        break;
+                    case 'F':
+                        setMotorSpeeds(LEFT_MOTOR_MAX / M_2_PI, RIGHT_MOTOR_MAX / 2);
+                        break;
+                    case 'S':
+                        // slow
+                        setMotorSpeeds(LEFT_MOTOR_MAX / 4, RIGHT_MOTOR_MAX / 4);
+                        break;
+                    case 'B':
+                        setMotorSpeeds(0, 0);
+                        break;
+                    default:
+                        USART_SendString("Please switch to CMD mode first"); //?
+                        USART_SendString("\r\n");
+                        break;
+                    }
+                }
                 switch (cmd)
                 {
-                case 'R':
-                    setMotorSpeeds(LEFT_MOTOR_MAX / 2, 0);
-                    break;
-                case 'L':
-                    setMotorSpeeds(0, RIGHT_MOTOR_MAX / 2);
-                    break;
-                case 'F':
-                    setMotorSpeeds(LEFT_MOTOR_MAX / 2, RIGHT_MOTOR_MAX / 2);
-                    break;
-                case 'S':
-                    // slow
-                    setMotorSpeeds(LEFT_MOTOR_MAX / 4, RIGHT_MOTOR_MAX / 4);
-                    break;
-                case 'B':
-                    setMotorSpeeds(0, 0);
-                    break;
                 case 'C':
                     calibrateSensors(&calData);
                     break;
                 case 'K':
-                {
                     readCalibrated(sensorValues, calibratedValues, &calData);
-                    for (int i = 0; i < 8; i++)
-                    {
-                        char buf[32];
-                        snprintf(buf, sizeof(buf), "sensorVal: %d\r\n", sensorValues[i]);
-                        USART_SendString(buf);
-                        snprintf(buf, sizeof(buf), "calMax: %d, calMin: %d, sen: %d\r\n", calData.maxValues[i], calData.minValues[i], sensorValues[i]);
-                        USART_SendString(buf);
-                    }
-                    const char *direction = getDirection(calibratedValues, NUM_SENSORS);
-                    snprintf(buf, sizeof(buf), "Dir: %s\r\n", direction);
+                    const char* direction = getDirection(calibratedValues, NUM_SENSORS);
+                    snprintf(buf, sizeof(buf), "Dir: %s\r\n",  direction);
                     USART_SendString(buf);
                     break;
-                }
                 case 'T':
-                    USART_SendString("Switching to AUTONOMOUS mode");
-                    USART_SendString("\r\n");
-                    robotMode = AUTONOMOUS;
-                    break;
-                }
-            }
-            else
-            {
-                switch (cmd)
-                {
-                case 'T':
-                    USART_SendString("Switching to CMD mode");
-                    USART_SendString("\r\n");
-                    robotMode = CMD;
-                    break;
-                }
-            }
-            USART_ClearStringBuffer();
-            USART_SetStringReady(0);
-        }
-        /* Check if hex data is ready */
-        if (USART_IsHexReady())
-        {
-            uint8_t *hex_buffer = USART_GetHexBuffer();
-            uint8_t hex_size = USART_GetHexBufferSize();
-            if (hex_size > 0 && robotMode == CMD)
-            {
-                switch (hex_buffer[0])
-                {
-                case 0x00:
-                    // turn right
-                    turnRight();
-                    break;
-                case 0x01:
-                    // go forward
-                    goForward();
-                    break;
-                case 0x02:
-                    // turn left
-                    turnLeft();
-                    break;
-                case 0x03:
-                    // go back
-                    goBack();
+                    if (robotMode == AUTONOMOUS)
+                    {
+                        USART_SendString("Switching to CMD mode");
+                        USART_SendString("\r\n");
+                        robotMode = CMD;
+                    }
+                    else
+                    {
+                        USART_SendString("Switching to AUTONOMOUS mode");
+                        USART_SendString("\r\n");
+                        robotMode = AUTONOMOUS;
+                    }
                     break;
                 default:
-                    USART_SendString("Invalid!! Received hex: ");
-                    USART_SendHexByte(hex_buffer, hex_size);
+                    USART_SendString("Received string: ");
+                    USART_SendString(received);
                     USART_SendString("\r\n");
+                    break;
                 }
+                USART_ClearStringBuffer();
+                USART_SetStringReady(0);
+
+                /* Check if hex data is ready */
+                if (USART_IsHexReady())
+                {
+                    uint8_t *hex_buffer = USART_GetHexBuffer();
+                    uint8_t hex_size = USART_GetHexBufferSize();
+
+                    if (hex_size > 0)
+                    {
+                        if (g_leftSpeed == 0 && g_rightSpeed == 0)
+                        {
+                            if (hex_buffer[0] >> 6 == 0x00)
+                            {
+                                // turn right
+                                setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
+                                _delay_ms(100);
+                                setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, 0);
+                                _delay_ms(HALF_TURN_DELAY);
+                                setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
+                                _delay_ms(100);
+                            }
+                            else if (hex_buffer[0] >> 6 == 0x01)
+                            {
+                                // go forward
+                                setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
+                                _delay_ms(100);
+                            }
+                            else if (hex_buffer[0] >> 6 == 0x02)
+                            {
+                                // turn left
+                                setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
+                                _delay_ms(100);
+                                setMotorSpeeds(0, BASE_SPEED);
+                                _delay_ms(HALF_TURN_DELAY);
+                                setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
+                                _delay_ms(100);
+                            }
+                            else if (hex_buffer[0] >> 6 == 0x03)
+                            {
+                                // go back
+                                setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
+                                _delay_ms(100);
+                                setMotorSpeeds(0, BASE_SPEED);
+                                _delay_ms(HALF_TURN_DELAY * 2);
+                                setMotorSpeeds(BASE_SPEED + LEFT_MOTOR_MAX - RIGHT_MOTOR_MAX, BASE_SPEED);
+                                _delay_ms(100);
+                            }
+                            else
+                            {
+                                USART_SendString("Received hex: ");
+                                USART_SendHexByte(hex_buffer, hex_size);
+                                USART_SendString("\r\n");
+                            }
+                        }
+                    }
+                    USART_ClearHexBuffer();
+                    USART_SetHexReady(0);
+                }
+                if (robotMode == AUTONOMOUS)
+                {
+                    // followLine(qt);
+                }
+                // else
+                // {
+                //     setMotorSpeeds(0, 0);
+                // }
             }
-            USART_ClearHexBuffer();
-            USART_SetHexReady(0);
-        }
-        if (robotMode == AUTONOMOUS)
-        {
-            followLine(sensorValues, calibratedValues, &calData);
         }
     }
 }
