@@ -8,7 +8,6 @@
 #include <avr/eeprom.h>
 #include <avr/interrupt.h>
 #include <stdlib.h>
-#include <inttypes.h>
 #define EEPROM_MAGIC_NUMBER 0xA5A5 // Unique identifier to check if EEPROM is initialized
 
 #define LEFT_MOTOR_PWM 19   // PD5 (OC1A) for left motor PWM (PWMA)
@@ -26,18 +25,17 @@
 #define EMITTER_PIN_DDR DDRC
 #define CALIBRATION_TIME_MS 5000 // 5 seconds for calibration
 #define NUM_SENSORS 8
-#define KP 0.02                   // Proportional gain for PID control
+#define KP 0.04                   // Proportional gain for PID control
 #define KD 0.05                   // Derivative gain for PID control
 #define BASE_SPEED 70             // Base PWM value for motor speed (0-255)
 #define LINE_POSITION_CENTER 3500 // Center position for 8 sensors (0–7000)
 #define HALF_TURN_DELAY 500       // Turning 90 Degree delay
-#define DELAY_BEFORE_TURN 350
+#define DELAY_BEFORE_TURN 370
 #define DELAY_AFTER_TURN 300
+#define TURN_DERROR_THRESHOLD 1500 // when turning, derror increases significantly. In this case, turning velocity should be adjusted (increased) so that IR stay on line. In this case, use KD_2
 #define BLACK_THRESHOLD 500
 #define DEADBAND 500 // allow flexibility in error
-#define JUNCTION_SCAN_DELAY 100
-#define JUNCTION_SCAN_ITER 4
-
+#define MAX_MISMATCH_COUNT 2
 typedef struct
 {
     uint16_t magic_number;    // Magic number to validate EEPROM data
@@ -48,9 +46,8 @@ typedef struct
     uint16_t black_threshold; // Threshold for detecting black line
     uint16_t turn_delay;      // Calculated delay for 90-degree turn (ms)
     uint16_t delay_before_turn;
+    uint16_t max_mismatch_count; // keep track of the occurence of black sensors are not contiguous
     int16_t deadband;
-    int16_t junction_scan_delay;
-    int16_t junction_scan_iter;
 } EepromData;
 
 // Calibration data structure
@@ -78,9 +75,9 @@ volatile EEMEM EepromData ee_data = {
     .black_threshold = BLACK_THRESHOLD,
     .turn_delay = HALF_TURN_DELAY,
     .delay_before_turn = DELAY_BEFORE_TURN,
-    .deadband = DEADBAND,
-    .junction_scan_delay = JUNCTION_SCAN_DELAY,
-    .junction_scan_iter = JUNCTION_SCAN_ITER};
+    .max_mismatch_count = MAX_MISMATCH_COUNT,
+    .deadband = DEADBAND
+};
 // Runtime copy of EEPROM data
 volatile EepromData g_eeprom_data;
 volatile Mode robotMode = CMD; // Start in CMD mode
@@ -97,9 +94,8 @@ volatile uint8_t hex_nibble = 0;
 volatile uint16_t g_leftSpeed = 0;
 volatile uint16_t g_rightSpeed = 0;
 
-volatile int turnState = 0;
-volatile int junctionState = 0;
-volatile int junction_scan_count = 0;
+volatile int state = 0;
+volatile uint16_t mismatch_count = 0;
 void delay_ms(int16_t ms)
 {
     while (ms--)
@@ -172,6 +168,8 @@ void _subr_turnLeft()
 {
     setMotorSpeeds(-g_eeprom_data.base_speed, g_eeprom_data.base_speed + g_eeprom_data.motor_offset);
     delay_ms(g_eeprom_data.turn_delay);
+    // setMotorSpeeds(g_eeprom_data.base_speed, g_eeprom_data.base_speed + g_eeprom_data.motor_offset);
+    // delay_ms(g_eeprom_data.delay_after_turn);
     setMotorSpeeds(0, 0);
 }
 
@@ -180,6 +178,8 @@ void _subr_turnRight()
 
     setMotorSpeeds(g_eeprom_data.base_speed, -g_eeprom_data.base_speed - g_eeprom_data.motor_offset);
     delay_ms(g_eeprom_data.turn_delay);
+    // setMotorSpeeds(g_eeprom_data.base_speed, g_eeprom_data.base_speed + g_eeprom_data.motor_offset);
+    // delay_ms(g_eeprom_data.delay_after_turn);
     setMotorSpeeds(0, 0);
 }
 
@@ -194,6 +194,8 @@ void _subr_goBack()
 {
     setMotorSpeeds(-g_eeprom_data.base_speed, g_eeprom_data.base_speed + g_eeprom_data.motor_offset);
     delay_ms(g_eeprom_data.turn_delay * 2);
+    // setMotorSpeeds(g_eeprom_data.base_speed, g_eeprom_data.base_speed + g_eeprom_data.motor_offset);
+    // delay_ms(g_eeprom_data.delay_after_turn);
     setMotorSpeeds(0, 0);
 }
 
@@ -340,42 +342,7 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
     uint8_t blackSensors;
     uint8_t minBlackSensorIdx;
     uint8_t maxBlackSensorIdx;
-
-    if (junctionState == 1 || junctionState == -1)
-    {
-        junction_scan_count++;
-        setMotorSpeeds(g_eeprom_data.base_speed * junctionState, (g_eeprom_data.base_speed + g_eeprom_data.motor_offset) * (-junctionState));
-        delay_ms(g_eeprom_data.junction_scan_delay * junction_scan_count);
-        setMotorSpeeds(0, 0);
-        readLinePosition(calibratedValues, NUM_SENSORS, &blackSensors, &minBlackSensorIdx, &maxBlackSensorIdx);
-        if (blackSensors >= 3)
-        {
-            setMotorSpeeds(g_eeprom_data.base_speed * (-junctionState), (g_eeprom_data.base_speed + g_eeprom_data.motor_offset) * junctionState);
-            delay_ms(g_eeprom_data.junction_scan_delay * junction_scan_count);
-            junctionState = 0;
-            junction_scan_count = 0;
-            robotMode = JUNCTION;
-            setMotorSpeeds(0, 0);
-            USART_SendString("JH\r\n");
-            return;
-        }
-        if (junction_scan_count == g_eeprom_data.junction_scan_iter)
-        {
-            setMotorSpeeds(g_eeprom_data.base_speed * (-junctionState), (g_eeprom_data.base_speed + g_eeprom_data.motor_offset) * junctionState);
-            delay_ms(g_eeprom_data.junction_scan_delay * (junction_scan_count / 2));
-            junctionState = 0;
-            junction_scan_count = 0;
-            setMotorSpeeds(0, 0);
-            robotMode = JUNCTION;
-            USART_SendString("JL\r\n");
-            return;
-        }
-        junctionState = -junctionState;
-        return;
-    }
-
     unsigned int position = readLinePosition(calibratedValues, NUM_SENSORS, &blackSensors, &minBlackSensorIdx, &maxBlackSensorIdx);
-
     char buf[32];
     USART_SendString("blackSensors ");
     snprintf(buf, sizeof(buf), "%d \r\n", blackSensors);
@@ -385,45 +352,40 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
     snprintf(buff, sizeof(buff), "%d, %d \r\n", maxBlackSensorIdx, minBlackSensorIdx);
     USART_SendString(buff);
 
-    // turnState 0 : normal execution
-    // turnState 1 : probably turn detected. go forward a bit and rotate until 4 or more IR sensor detect black line
+    // state 0 : normal execution
+    // state 1 : probably turn detected. go forward a bit and rotate until 4 or more IR sensor detect black line
 
-    if (turnState == 1 && blackSensors > 3)
-    {
-        turnState = 0;
-    }
-    if (turnState == 1)
+    if (state == 1 && blackSensors > 3)
+        state = 0;
+    if (state == 1)
         return;
     // stop on white surface
     if (blackSensors == 0)
     {
-        setMotorSpeeds(g_eeprom_data.base_speed, g_eeprom_data.base_speed + g_eeprom_data.motor_offset);
+        setMotorSpeeds(g_leftSpeed, g_rightSpeed);
         delay_ms(g_eeprom_data.delay_before_turn);
-        setMotorSpeeds(0, 0);
-        readLinePosition(calibratedValues, NUM_SENSORS, &blackSensors, &minBlackSensorIdx, &maxBlackSensorIdx);
-        if(blackSensors >= 3){
-            robotMode = JUNCTION;
-            USART_SendString("JK\r\n");
-        }else{
-            junction_scan_count = 0;
-            junctionState = 1;
-        }
+        setMotorSpeeds(0, 0); // Stop robot
+        robotMode = JUNCTION;
+        USART_SendString("J\r\n");
         return;
     }
-    if (blackSensors != (maxBlackSensorIdx - minBlackSensorIdx + 1) || blackSensors <= 2)
+    if (blackSensors != (maxBlackSensorIdx - minBlackSensorIdx + 1))
     {
+        // mismatch_count++;
+        // if (mismatch_count >= g_eeprom_data.max_mismatch_count)
+        // {
+        //     setMotorSpeeds(g_leftSpeed, g_rightSpeed);
+        //     delay_ms(g_eeprom_data.delay_before_turn);
+        //     setMotorSpeeds(0, 0); // Stop robot
+        //     robotMode = JUNCTION;
+        //     USART_SendString("J\r\n");
+        //     return;
+        // }
+        // to avoid these noise parts of map
         return;
     }
-
-    if (blackSensors > 5 && (calibratedValues[0] > 500 || calibratedValues[NUM_SENSORS - 1] > 500))
-    {
-        setMotorSpeeds(g_eeprom_data.base_speed, g_eeprom_data.base_speed + g_eeprom_data.motor_offset);
-        delay_ms(g_eeprom_data.delay_before_turn);
-        int sign = calibratedValues[0] > 500 ? -1 : 1;
-        setMotorSpeeds((g_eeprom_data.base_speed) * sign, (g_eeprom_data.base_speed + g_eeprom_data.motor_offset) * (-sign));
-        turnState = 1;
-        return;
-    }
+    // clear when black sensors are contiguous
+    mismatch_count = 0;
 
     int16_t error = position - LINE_POSITION_CENTER;
     int16_t correction;
@@ -444,7 +406,24 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
     lastError = error;
     int16_t leftSpeed = g_eeprom_data.base_speed + correction;
     int16_t rightSpeed = g_eeprom_data.base_speed + g_eeprom_data.motor_offset - correction;
-    setMotorSpeeds(leftSpeed, rightSpeed);
+
+    // char buffe[64];
+    // USART_SendString("error, lastDerror, correction, leftspeed, rightspeed \r\n");
+    // snprintf(buffe, sizeof(buffe), "%d, %d, %d, %d, %d \r\n", error, lastDError, correction, leftSpeed, rightSpeed);
+    // USART_SendString(buffe);
+
+    if (blackSensors > 5 && (calibratedValues[0] > 500 || calibratedValues[NUM_SENSORS - 1] > 500))
+    {
+        setMotorSpeeds(g_eeprom_data.base_speed, g_eeprom_data.base_speed + g_eeprom_data.motor_offset);
+        delay_ms(g_eeprom_data.delay_before_turn);
+        int sign = calibratedValues[0] > 500 ? -1 : 1;
+        setMotorSpeeds((g_eeprom_data.base_speed) * sign, (g_eeprom_data.base_speed + g_eeprom_data.motor_offset) * (-sign));
+        state = 1;
+    }
+    else
+    {
+        setMotorSpeeds(leftSpeed, rightSpeed);
+    }
 }
 
 const char *getDirection(uint16_t *calibratedValues, uint8_t numSensors)
@@ -524,9 +503,8 @@ void eeprom_init()
         temp.black_threshold = BLACK_THRESHOLD;
         temp.turn_delay = HALF_TURN_DELAY;
         temp.delay_before_turn = DELAY_BEFORE_TURN;
+        temp.max_mismatch_count = MAX_MISMATCH_COUNT;
         temp.deadband = DEADBAND;
-        temp.junction_scan_delay = JUNCTION_SCAN_DELAY;
-        temp.junction_scan_iter = JUNCTION_SCAN_ITER;
         eeprom_write_data(&temp);
     }
     memcpy((void *)&g_eeprom_data, (void *)&temp, sizeof(EepromData));
@@ -543,9 +521,8 @@ void _cmd_eeprom_default()
     temp.black_threshold = BLACK_THRESHOLD;
     temp.turn_delay = HALF_TURN_DELAY;
     temp.delay_before_turn = DELAY_BEFORE_TURN;
+    temp.max_mismatch_count = MAX_MISMATCH_COUNT;
     temp.deadband = DEADBAND;
-    temp.junction_scan_delay = JUNCTION_SCAN_DELAY;
-    temp.junction_scan_iter = JUNCTION_SCAN_ITER;
     eeprom_write_data(&temp);
     memcpy((void *)&g_eeprom_data, (void *)&temp, sizeof(EepromData));
 }
@@ -617,12 +594,12 @@ void _cmd_set_delay_before_turn(uint16_t delay)
     snprintf(buf, sizeof(buf), "Delay Before Turn set to %d\r\n", g_eeprom_data.delay_before_turn);
     USART_SendString(buf);
 }
-void _cmd_set_junction_scan_delay(int16_t delay)
+void _cmd_set_max_mismatch_count(uint16_t count)
 {
-    g_eeprom_data.junction_scan_delay = delay;
+    g_eeprom_data.max_mismatch_count = count;
     eeprom_write_data((const EepromData *)&g_eeprom_data);
     char buf[32];
-    snprintf(buf, sizeof(buf), "Junction Scan Delay Count set to %d\r\n", g_eeprom_data.junction_scan_delay);
+    snprintf(buf, sizeof(buf), "Max Mismatch Count set to %d\r\n", g_eeprom_data.max_mismatch_count);
     USART_SendString(buf);
 }
 
@@ -632,14 +609,6 @@ void _cmd_set_dead_band(int16_t val)
     eeprom_write_data((const EepromData *)&g_eeprom_data);
     char buf[32];
     snprintf(buf, sizeof(buf), "Dead Band set to %d\r\n", g_eeprom_data.deadband);
-    USART_SendString(buf);
-}
-void _cmd_set_junction_scan_iter(int16_t val)
-{
-    g_eeprom_data.junction_scan_iter = val;
-    eeprom_write_data((const EepromData *)&g_eeprom_data);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Junction Scan Iter set to %d\r\n", g_eeprom_data.junction_scan_iter);
     USART_SendString(buf);
 }
 
@@ -656,7 +625,7 @@ void _cmd_showSensorVal(uint16_t *sensorValues, uint16_t *calibratedValues, Cali
     snprintf(buf, sizeof(buf), "Dir: %s\r\n", direction);
     USART_SendString(buf);
     char buff[128];
-    snprintf(buff, sizeof(buff), "mo: %d, bs: %d, kp: %d, kd: %d, bt: %d, td: %d, db: %d, sd: %d, db: %d, si: %d\r\n", g_eeprom_data.motor_offset, g_eeprom_data.base_speed, (int)(g_eeprom_data.kp * 1000), (int)(g_eeprom_data.kd * 1000), g_eeprom_data.black_threshold, g_eeprom_data.turn_delay, g_eeprom_data.delay_before_turn, g_eeprom_data.junction_scan_delay, g_eeprom_data.deadband, g_eeprom_data.junction_scan_iter);
+    snprintf(buff, sizeof(buff), "mo: %d, bs: %d, kp: %d, kd: %d, bt: %d, td: %d, db: %d, mmc: %d, db: %d\r\n", g_eeprom_data.motor_offset, g_eeprom_data.base_speed, (int)(g_eeprom_data.kp * 1000), (int)(g_eeprom_data.kd * 1000), g_eeprom_data.black_threshold, g_eeprom_data.turn_delay, g_eeprom_data.delay_before_turn, g_eeprom_data.max_mismatch_count, g_eeprom_data.deadband);
     USART_SendString(buff);
 }
 
@@ -754,26 +723,13 @@ int main(void)
                 case 'Z':
                 {
                     int16_t delay = atoi(&received[1]);
-                    _cmd_set_junction_scan_delay(delay);
-                    break;
-                }
-                case 'O':
-                {
-                    int16_t val = atoi(&received[1]);
-                    _cmd_set_junction_scan_iter(val);
-                    break;
-                }
-                case 'U':
-                {
-                    int16_t val = atoi(&received[1]);
-                    _cmd_set_dead_band(val);
+                    _cmd_set_max_mismatch_count(delay);
                     break;
                 }
                 case 'T':
                     USART_SendString("Switching to AUTONOMOUS mode");
                     USART_SendString("\r\n");
                     robotMode = AUTONOMOUS;
-
                     break;
                 }
             }
@@ -783,24 +739,19 @@ int main(void)
                 {
                 case 'R':
                     _subr_turnRight();
-
                     robotMode = AUTONOMOUS;
-
                     break;
                 case 'F':
                     _subr_goForward();
                     robotMode = AUTONOMOUS;
-
                     break;
                 case 'L':
                     _subr_turnLeft();
                     robotMode = AUTONOMOUS;
-
                     break;
                 case 'B':
                     _subr_goBack();
                     robotMode = AUTONOMOUS;
-
                     break;
                 case 'T':
                     USART_SendString("Switching to CMD mode");
