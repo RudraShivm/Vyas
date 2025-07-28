@@ -351,8 +351,12 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
         delay_ms(g_eeprom_data.junction_scan_delay * junction_scan_count);
         setMotorSpeeds(0, 0);
         readLinePosition(calibratedValues, NUM_SENSORS, &blackSensors, &minBlackSensorIdx, &maxBlackSensorIdx);
+        snprintf(buf, sizeof(buf), "blackSensors=%d, minIdx=%d, maxIdx=%d, l=%d, r=%d\r\n", blackSensors, minBlackSensorIdx, maxBlackSensorIdx, g_leftSpeed, g_rightSpeed);
+        USART_SendString(buf);
         if (blackSensors >= 3)
         {
+            snprintf(buf, sizeof(buf), "1.Line found, entered JUNCTION mode, blackSensor=%d l=%d, r=%d\r\n", blackSensors, g_leftSpeed, g_rightSpeed);
+            USART_SendString(buf);
             setMotorSpeeds(g_eeprom_data.base_speed * (-junctionState), (g_eeprom_data.base_speed + g_eeprom_data.motor_offset) * junctionState);
             delay_ms(g_eeprom_data.junction_scan_delay * (junction_scan_count));
             setMotorSpeeds(0, 0);
@@ -360,6 +364,8 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
             junction_scan_count = 0;
             robotMode = JUNCTION;
             USART_SendString("J\r\n");
+            snprintf(buf, sizeof(buf), "2.Line found, entered JUNCTION mode, blackSensor=%d l=%d, r=%d\r\n", blackSensors, g_leftSpeed, g_rightSpeed);
+            USART_SendString(buf);
             return;
         }
         if (junction_scan_count == g_eeprom_data.junction_scan_iter)
@@ -371,6 +377,7 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
             setMotorSpeeds(0, 0);
             robotMode = JUNCTION;
             USART_SendString("J\r\n");
+            USART_SendString("Max scans reached, entered JUNCTION mode\r\n");
             return;
         }
         junctionState = -junctionState;
@@ -378,6 +385,15 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
     }
 
     unsigned int position = readLinePosition(calibratedValues, NUM_SENSORS, &blackSensors, &minBlackSensorIdx, &maxBlackSensorIdx);
+
+    char buf[32];
+    USART_SendString("blackSensors ");
+    snprintf(buf, sizeof(buf), "%d \r\n", blackSensors);
+    USART_SendString(buf);
+    char buff[32];
+    USART_SendString("maxBlackSensorIdx, minBlackSensorIdx ");
+    snprintf(buff, sizeof(buff), "%d, %d \r\n", maxBlackSensorIdx, minBlackSensorIdx);
+    USART_SendString(buff);
 
     // turnState 0 : normal execution
     // turnState 1 : probably turn detected. go forward a bit and rotate until 4 or more IR sensor detect black line
@@ -395,6 +411,10 @@ void followLine(uint16_t *sensorValues, uint16_t *calibratedValues, CalibrationD
         delay_ms(g_eeprom_data.delay_before_turn);
         setMotorSpeeds(0, 0);
         readLinePosition(calibratedValues, NUM_SENSORS, &blackSensors, &minBlackSensorIdx, &maxBlackSensorIdx);
+        char buff[32];
+        USART_SendString("maxBlackSensorIdx, minBlackSensorIdx, blacksensors ");
+        snprintf(buff, sizeof(buff), "%d, %d, %d \r\n", maxBlackSensorIdx, minBlackSensorIdx, blackSensors);
+        USART_SendString(buff);
         if (blackSensors >= 2)
         {
             robotMode = JUNCTION;
